@@ -1,0 +1,86 @@
+
+version: '3.9'
+
+services:
+  api:
+    build: ./api
+#    ports:
+#      - 8080:8080
+    environment:
+      - POSTGRES_USER=student_user
+      - POSTGRES_PASSWORD=student_password
+      - POSTGRES_DATABASE=labo
+      - POSTGRES_PORT=5432
+      - POSTGRES_HOST=postgres
+      - PORT=8080
+    depends_on:
+      postgres:
+        condition: service_healthy
+    labels:
+      - "traefik.http.routers.api.rule=Host(`api.local`)"
+      -  traefik.http.services.api.loadbalancer.server.port=8080
+      - "traefik.http.routers.api.middlewares=admin"
+      - "traefik.http.middlewares.admin.basicauth.users=dag"
+  frontend:
+    build: ./web
+    expose:
+      - 5000
+    environment:
+      - module=wsgi:app
+      - master=true
+      - processes=4
+      - vacuum=true
+      - die-on-term=true
+      - protocol=http
+      - socket=0.0.0.0:5000
+    volumes:
+      - static:/app/webapp/static:ro
+  nginx:
+    build: ./nginx
+#    ports:
+#      - 80:80
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - static:/app/static:ro
+    labels:
+      - "traefik.http.routers.frontend.rule=Host(`frontend.local`)"
+      - "traefik.docker.network=web"
+  postgres:
+    image: 'postgres:15.3-alpine'
+    environment:
+      - POSTGRES_USER=student_user
+      - POSTGRES_PASSWORD=student_password
+      - POSTGRES_DB=labo
+    labels:
+      - "traefik.enable=false"
+      - "traefik.docker.network=data"
+    volumes:
+      - postgres:/var/lib/postgresql/data/
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready"]
+      interval: 10s
+      timeout: 5s
+      start_period: 10s
+  reverse-proxy:
+    # The official v2 Traefik docker image
+    image: traefik:v2.10
+    # Enables the web UI and tells Traefik to listen to docker
+    command: --api.insecure=true --providers.docker
+    ports:
+      # The HTTP port
+      - "80:80"
+      # The Web UI (enabled by --api.insecure=true)
+#      - "8080:8080"
+    labels:
+      - "traefik.http.routers.traefik.rule=Host(`traefik.local`)"
+      - traefik.http.services.traefik.loadbalancer.server.port=8080
+      - "traefik.http.routers.api.middlewares=admin"
+      - "traefik.http.middlewares.admin.basicauth.users=dag"
+    volumes:
+      # So that Traefik can listen to the Docker events
+      - /var/run/docker.sock:/var/run/docker.sock
+
+volumes:
+  postgres:
+  static:
+
